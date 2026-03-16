@@ -42,7 +42,8 @@ pub fn spawn_keepalive_listener(
         while !stop.load(Ordering::Relaxed) {
             match socket.recv_from(&mut buf) {
                 Ok((size, src)) => {
-                    if let Err(err) = handle_keepalive_packet(&socket, &registry, src, &buf[..size]) {
+                    if let Err(err) = handle_keepalive_packet(&socket, &registry, src, &buf[..size])
+                    {
                         error!("failed to handle keepalive packet from {src}: {err}");
                     }
                 }
