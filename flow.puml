@@ -1,0 +1,88 @@
+@startuml
+title Quote Server / Quote Client Interaction
+
+actor User
+
+box "quote_client threads"
+participant "::main" as client_main
+participant "udp receiver" as client_udp
+participant "server_ka sender" as client_ping
+end box
+
+box "quote_server threads"
+participant "::main" as server_main
+participant "generator" as gen
+participant "tcp listener" as tcp_listener
+participant "tcp connection handler" as tcp_handler
+participant "keepalive listener" as server_ka
+participant "quotes broadcaster" as broadcaster
+participant "udp downstream worker" as udp_worker
+end box
+
+User -> client_main : start client
+User -> server_main : start server
+
+server_main -> gen : spawn_generator()
+server_main -> tcp_listener : spawn_tcp_listener()
+server_main -> server_ka : spawn recv_from(PING)
+server_main -> broadcaster : spawn_quotes_broadcaster()
+
+activate client_main
+client_main -> tcp_listener : TCP: STREAM udp://<client_ip:udp_port> <tickers_csv>
+tcp_listener -> tcp_handler : spawn handle_tcp_connection()
+tcp_handler -> tcp_handler : parse_stream_command()
+tcp_handler -> server_main : stream_events channel: new StreamRequest 
+tcp_handler --> client_main : TCP\nOK
+deactivate client_main
+
+server_main -> udp_worker : spawn_client_stream_worker()
+
+loop every DEFAULT_TICK_INTERVAL
+gen -> broadcaster : quotes channel: quotes pipeline
+broadcaster -> udp_worker : worker channel: fan-out quotes
+udp_worker -> udp_worker : filter by client tickers
+udp_worker --> client_udp : UDP: JSON payload\nQuotesBatch { quotes: [...] }
+end
+
+loop every PING_INTERVAL
+client_ping --> server_ka : UDP: PING
+server_ka -> server_ka : registry.update_ping(src)
+server_ka --> client_udp : UDP: PONG
+end
+
+alt no quotes / no PONG / server restarted
+client_main -> client_main : detect degraded connection
+client_main -> client_main : state = reconnecting
+loop every RECONNECT_INTERVAL
+client_main -> tcp_listener : TCP: STREAM udp://<client_ip:udp_port> <tickers_csv>
+tcp_listener -> tcp_handler : spawn handle_tcp_connection()
+tcp_handler -> tcp_handler : parse_stream_command()
+tcp_handler -> server_main : stream_events channel: new StreamRequest
+tcp_handler --> client_main : TCP\nOK
+client_main -> client_main : state = degraded
+break on first resumed UDP batch
+end
+client_udp --> client_main : resumed UDP quotes
+client_main -> client_main : state = connected
+end
+
+alt no PING for > PING_TIMEOUT
+udp_worker -> udp_worker : registry.is_ping_fresh() == false
+udp_worker -> udp_worker : stop worker loop
+udp_worker -> server_main : remove worker / remove subscription
+udp_worker -> server_main : dynamic_done channel : join and remove thread
+end
+
+User -> client_main : Ctrl+C
+client_main -> client_udp : stop_flag = true
+client_main -> client_ping : stop_flag = true
+
+User -> server_main : Ctrl+C
+server_main -> gen : stop_flag = true
+server_main -> tcp_listener : stop_flag = true
+' server_main -> tcp_handler : stop_flag = true
+server_main -> server_ka : stop_flag = true
+server_main -> broadcaster : stop_flag = true
+server_main -> udp_worker : stop_flag = true
+
+@enduml

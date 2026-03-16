@@ -1,0 +1,22 @@
+[package]
+name = "don-qui-quote"
+version = "0.1.0"
+edition = "2024"
+
+# [[bin]]
+# name = "quote_server"
+# path = "src/bin/quote_server.rs"
+
+# [[bin]]
+# name = "quote_clent"
+# path = "src/bin/quote_client.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+ctrlc = "3"
+env_logger = "0.11"
+log = "0.4"
+rand = "0.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
